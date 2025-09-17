@@ -53,6 +53,30 @@ static long long fib_sequence(long long k)
     return ret;
 }
 
+/* Calculate Fibonacci number using Fast Doubling */
+static long long fib_sequence_fdoubling(long long n)
+{
+    if (n <= 2)
+        return !!n;
+
+    long long a = 0;  // F(0)
+    long long b = 1;  // F(1)
+
+    for (unsigned int h = 1 << (31 - __builtin_clz(n)); h; h >>= 1) {
+        long long c = a * (2 * b - a);  // F(2k) = F(k) * [2 * F(k+1) - F(k)]
+        long long d = a * a + b * b;  // F(2k+1) = F(k) * F(k) + F(k+1) * F(k+1)
+
+        if (h & n) {
+            a = d;      // F(n) = F(2k+1)
+            b = c + d;  // F(n+1) = F(n-1) + F(n) = F(2k) + F(2k+1)
+        } else {
+            a = c;  // F(n) = F(2k)
+            b = d;  // F(n+1) = F(2k+1)
+        }
+    }
+    return a;
+}
+
 static int fib_open(struct inode *inode, struct file *file)
 {
     if (!mutex_trylock(&fib_mutex)) {
