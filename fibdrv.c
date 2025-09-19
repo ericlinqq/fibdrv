@@ -25,6 +25,22 @@ static dev_t fib_dev = 0;
 static struct class *fib_class;
 static DEFINE_MUTEX(fib_mutex);
 static int major = 0, minor = 0;
+static ktime_t kt;
+
+typedef long long (*fib_ft)(long long);
+
+/*
+ * Timing function for fib_sequence* function
+ */
+static long long fib_time_proxy(fib_ft fib, long long k)
+{
+    kt = ktime_get();
+    long long res = fib(k);
+    kt = ktime_sub(ktime_get(), kt);
+
+    return res;
+}
+
 
 /**
  * fib_sequence() - Calculate the k-th Fibonacci number
@@ -53,8 +69,40 @@ static long long fib_sequence(long long k)
     return ret;
 }
 
-/* Calculate Fibonacci number using Fast Doubling */
 static long long fib_sequence_fdoubling(long long n)
+{
+    if (n <= 2)
+        return !!n;
+
+    long long a = 0;  // F(0)
+    long long b = 1;  // F(1)
+
+    /* get highest set bit */
+    unsigned long long h = n >> 32 | n;
+    h |= h >> 16;
+    h |= h >> 8;
+    h |= h >> 4;
+    h |= h >> 2;
+    h |= h >> 1;
+    h ^= (h >> 1);
+
+    for (; h; h >>= 1) {
+        long long c = a * (2 * b - a);  // F(2k) = F(k) * [2 * F(k+1) - F(k)]
+        long long d = a * a + b * b;  // F(2k+1) = F(k) * F(k) + F(k+1) * F(k+1)
+
+        if (h & n) {
+            a = d;      // F(n) = F(2k+1)
+            b = c + d;  // F(n+1) = F(n-1) + F(n) = F(2k) + F(2k+1)
+        } else {
+            a = c;  // F(n) = F(2k)
+            b = d;  // F(n+1) = F(2k+1)
+        }
+    }
+    return a;
+}
+
+/* Calculate Fibonacci number using Fast Doubling */
+static long long fib_sequence_fdoubling_clz(long long n)
 {
     if (n <= 2)
         return !!n;
@@ -77,6 +125,7 @@ static long long fib_sequence_fdoubling(long long n)
     return a;
 }
 
+
 static int fib_open(struct inode *inode, struct file *file)
 {
     if (!mutex_trylock(&fib_mutex)) {
@@ -98,16 +147,32 @@ static ssize_t fib_read(struct file *file,
                         size_t size,
                         loff_t *offset)
 {
-    return (ssize_t) fib_sequence(*offset);
+    return (ssize_t) fib_sequence_fdoubling(*offset);
 }
 
-/* write operation is skipped */
+/*
+ * Use write operation for returning the time spent on
+ * calculating the fibonacci number for given offset
+ */
 static ssize_t fib_write(struct file *file,
                          const char *buf,
                          size_t size,
                          loff_t *offset)
 {
-    return 1;
+    switch (size) {
+    case 0:
+        fib_time_proxy(fib_sequence, *offset);
+        break;
+    case 1:
+        fib_time_proxy(fib_sequence_fdoubling, *offset);
+        break;
+    case 2:
+        fib_time_proxy(fib_sequence_fdoubling_clz, *offset);
+        break;
+    default:
+        return 1;
+    }
+    return (ssize_t) ktime_to_ns(kt);
 }
 
 static loff_t fib_device_lseek(struct file *file, loff_t offset, int orig)
@@ -172,6 +237,7 @@ static int __init init_fib_dev(void)
         rc = -4;
         goto failed_device_create;
     }
+
     return rc;
 failed_device_create:
     class_destroy(fib_class);

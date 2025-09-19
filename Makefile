@@ -9,7 +9,7 @@ PWD := $(shell pwd)
 
 GIT_HOOKS := .git/hooks/applied
 
-all: $(GIT_HOOKS) client
+all: $(GIT_HOOKS) client client_plot
 	$(MAKE) -C $(KDIR) M=$(PWD) modules
 
 $(GIT_HOOKS):
@@ -26,6 +26,12 @@ unload:
 
 client: client.c
 	$(CC) -o $@ $^
+
+client_plot: client_plot.c
+	$(CC) -o $@ $^
+
+plot:
+	sh measure.sh > /dev/null
 
 PRINTF = env printf
 PASS_COLOR = \e[32;01m
