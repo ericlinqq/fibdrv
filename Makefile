@@ -9,7 +9,7 @@ PWD := $(shell pwd)
 
 GIT_HOOKS := .git/hooks/applied
 
-all: $(GIT_HOOKS) client client_plot
+all: $(GIT_HOOKS) client client_plot client_stat
 	$(MAKE) -C $(KDIR) M=$(PWD) modules
 
 $(GIT_HOOKS):
@@ -29,6 +29,9 @@ client: client.c
 
 client_plot: client_plot.c
 	$(CC) -o $@ $^
+
+client_stat: client_stat.c
+	$(CC) -lm -o $@ $^
 
 plot:
 	sh measure.sh > /dev/null

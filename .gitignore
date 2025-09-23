@@ -30,7 +30,13 @@ dkms.conf
 client
 client_plot
 out
+client_stat
 
 # gnuplot
 plot_*
 *.png
+
+# clangd
+.cache/
+.clangd
+compile_commands.json

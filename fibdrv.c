@@ -1,13 +1,16 @@
 #include <linux/cdev.h>
 #include <linux/device.h>
 #include <linux/fs.h>
+#include <linux/hw_breakpoint.h>
 #include <linux/init.h>
 #include <linux/kdev_t.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/perf_event.h>
 #include <linux/slab.h>
 #include <linux/version.h>
+
 
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("National Cheng Kung University, Taiwan");
@@ -25,20 +28,50 @@ static dev_t fib_dev = 0;
 static struct class *fib_class;
 static DEFINE_MUTEX(fib_mutex);
 static int major = 0, minor = 0;
-static ktime_t kt;
 
 typedef long long (*fib_ft)(long long);
+
+struct fib_ctx {
+    struct perf_event *pe;
+    int cpu;
+    fib_ft func;
+    long long k;
+    u64 cycle;
+    long long result;
+};
+
+struct perf_event_attr attr = {.type = PERF_TYPE_HARDWARE,
+                               .size = sizeof(attr),
+                               .config = PERF_COUNT_HW_CPU_CYCLES,
+                               .disabled = 0,
+                               .exclude_hv = 1,
+                               .pinned = 1,
+                               .exclusive = 1,
+                               .exclude_kernel = 0,
+                               .read_format = 0};
 
 /*
  * Timing function for fib_sequence* function
  */
-static long long fib_time_proxy(fib_ft fib, long long k)
+static long fib_cycle_delta(void *data)
 {
-    kt = ktime_get();
-    long long res = fib(k);
-    kt = ktime_sub(ktime_get(), kt);
+    struct fib_ctx *fc = data;
+    u64 v0 = 0, en0 = 0, run0 = 0;
+    u64 v1 = 0, en1 = 0, run1 = 0;
+    v0 = perf_event_read_value(fc->pe, &en0, &run0);
 
-    return res;
+    fc->result = fc->func(fc->k);
+
+    v1 = perf_event_read_value(fc->pe, &en1, &run1);
+
+    fc->cycle = v1 - v0;
+    return 0;
+}
+
+static long long fib_time_proxy(struct fib_ctx *fc)
+{
+    work_on_cpu(fc->cpu, fib_cycle_delta, fc);
+    return fc->result;
 }
 
 
@@ -110,7 +143,7 @@ static long long fib_sequence_fdoubling_clz(long long n)
     long long a = 0;  // F(0)
     long long b = 1;  // F(1)
 
-    for (unsigned int h = 1 << (31 - __builtin_clz(n)); h; h >>= 1) {
+    for (unsigned long long h = 1UL << (63 - __builtin_clzll(n)); h; h >>= 1) {
         long long c = a * (2 * b - a);  // F(2k) = F(k) * [2 * F(k+1) - F(k)]
         long long d = a * a + b * b;  // F(2k+1) = F(k) * F(k) + F(k+1) * F(k+1)
 
@@ -125,6 +158,16 @@ static long long fib_sequence_fdoubling_clz(long long n)
     return a;
 }
 
+static long fib_create_pe_oncpu(void *data)
+{
+    struct fib_ctx *fc = data;
+
+    fc->pe = perf_event_create_kernel_counter(&attr, fc->cpu, NULL, NULL, NULL);
+    if (IS_ERR(fc->pe))
+        return PTR_ERR(fc->pe);
+    return 0;
+}
+
 
 static int fib_open(struct inode *inode, struct file *file)
 {
@@ -132,12 +175,38 @@ static int fib_open(struct inode *inode, struct file *file)
         printk(KERN_ALERT "fibdrv is in use\n");
         return -EBUSY;
     }
+    struct fib_ctx *fc = kzalloc(sizeof(*fc), GFP_KERNEL);
+    if (!fc)
+        return -ENOMEM;
+
+    fc->cpu = smp_processor_id();
+
+    if (!cpu_online(fc->cpu)) {
+        kfree(fc);
+        return -EINVAL;
+    }
+
+    long ret = work_on_cpu(fc->cpu, fib_create_pe_oncpu, fc);
+
+    if (ret) {
+        kfree(fc);
+        return ret;
+    }
+
+    file->private_data = fc;
+
     return 0;
 }
 
 static int fib_release(struct inode *inode, struct file *file)
 {
     mutex_unlock(&fib_mutex);
+    struct fib_ctx *fc = file->private_data;
+    if (fc) {
+        if (fc->pe && !IS_ERR(fc->pe))
+            perf_event_release_kernel(fc->pe);
+        kfree(fc);
+    }
     return 0;
 }
 
@@ -159,20 +228,27 @@ static ssize_t fib_write(struct file *file,
                          size_t size,
                          loff_t *offset)
 {
+    struct fib_ctx *fc = file->private_data;
+    fc->k = *offset;
     switch (size) {
     case 0:
-        fib_time_proxy(fib_sequence, *offset);
+        fc->func = fib_sequence;
+        fib_time_proxy(fc);
         break;
     case 1:
-        fib_time_proxy(fib_sequence_fdoubling, *offset);
+        fc->func = fib_sequence_fdoubling;
+        fib_time_proxy(fc);
         break;
     case 2:
-        fib_time_proxy(fib_sequence_fdoubling_clz, *offset);
+        fc->func = fib_sequence_fdoubling_clz;
+        fib_time_proxy(fc);
         break;
     default:
         return 1;
     }
-    return (ssize_t) ktime_to_ns(kt);
+
+    // return (ssize_t) ktime_to_ns(kt);
+    return (ssize_t) fc->cycle;
 }
 
 static loff_t fib_device_lseek(struct file *file, loff_t offset, int orig)
