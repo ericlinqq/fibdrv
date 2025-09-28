@@ -48,10 +48,12 @@ int main()
 
     for (int i = 0; i <= offset; i++) {
         lseek(fd, i, SEEK_SET);
-        double naive = test(fd, write_buf, 0);
-        double fdoubling = test(fd, write_buf, 1);
-        double fdoubling_clz = test(fd, write_buf, 2);
-        printf("%d %.5lf %.5lf %.5lf\n", i, naive, fdoubling, fdoubling_clz);
+        double naive_dynamic = test(fd, write_buf, 0);
+        double naive_static = test(fd, write_buf, 1);
+        double fdoubling = test(fd, write_buf, 2);
+        double fdoubling_clz = test(fd, write_buf, 3);
+        printf("%d %.5lf %.5lf %.5lf %.5lf\n", i, naive_dynamic, naive_static,
+               fdoubling, fdoubling_clz);
     }
 
     close(fd);

@@ -19,10 +19,12 @@ int main()
 
     for (int i = 0; i <= offset; i++) {
         lseek(fd, i, SEEK_SET);
-        long long naive = write(fd, write_buf, 0);
-        long long fdoubling = write(fd, write_buf, 1);
-        long long fdoubling_clz = write(fd, write_buf, 2);
-        printf("%d %lld %lld %lld\n", i, naive, fdoubling, fdoubling_clz);
+        long long naive_dynamic = write(fd, write_buf, 0);
+        long long naive_static = write(fd, write_buf, 1);
+        long long fdoubling = write(fd, write_buf, 2);
+        long long fdoubling_clz = write(fd, write_buf, 3);
+        printf("%d %lld %lld %lld %lld\n", i, naive_dynamic, naive_static,
+               fdoubling, fdoubling_clz);
     }
 
     close(fd);

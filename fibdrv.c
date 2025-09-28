@@ -10,6 +10,7 @@
 #include <linux/perf_event.h>
 #include <linux/slab.h>
 #include <linux/version.h>
+#include "bignum.h"
 
 
 MODULE_LICENSE("Dual MIT/GPL");
@@ -36,7 +37,7 @@ struct fib_ctx {
     int cpu;
     fib_ft func;
     long long k;
-    u64 cycle;
+    unsigned long long cycle;
     long long result;
 };
 
@@ -56,8 +57,8 @@ struct perf_event_attr attr = {.type = PERF_TYPE_HARDWARE,
 static long fib_cycle_delta(void *data)
 {
     struct fib_ctx *fc = data;
-    u64 v0 = 0, en0 = 0, run0 = 0;
-    u64 v1 = 0, en1 = 0, run1 = 0;
+    unsigned long long v0 = 0, en0 = 0, run0 = 0;
+    unsigned long long v1 = 0, en1 = 0, run1 = 0;
     v0 = perf_event_read_value(fc->pe, &en0, &run0);
 
     fc->result = fc->func(fc->k);
@@ -101,6 +102,18 @@ static long long fib_sequence(long long k)
 
     return ret;
 }
+
+static long long fib_sequence2(long long k)
+{
+    long long a = 0;  // f(0)
+    long long b = 1;  // f(1)
+    for (int i = 0; i < k / 2; i++) {
+        a += b;  // f(i)
+        b += a;  // f(i + 1)
+    }
+    return (k & 1) ? b : a;
+}
+
 
 static long long fib_sequence_fdoubling(long long n)
 {
@@ -233,20 +246,20 @@ static ssize_t fib_write(struct file *file,
     switch (size) {
     case 0:
         fc->func = fib_sequence;
-        fib_time_proxy(fc);
         break;
     case 1:
-        fc->func = fib_sequence_fdoubling;
-        fib_time_proxy(fc);
+        fc->func = fib_sequence2;
         break;
     case 2:
+        fc->func = fib_sequence_fdoubling;
+        break;
+    case 3:
         fc->func = fib_sequence_fdoubling_clz;
-        fib_time_proxy(fc);
         break;
     default:
         return 1;
     }
-
+    fib_time_proxy(fc);
     // return (ssize_t) ktime_to_ns(kt);
     return (ssize_t) fc->cycle;
 }
