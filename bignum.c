@@ -89,11 +89,11 @@ static void _bn_add(bn *c, const bn *a, const bn *b)
     digit = DIV_ROUND_UP(digit, BN_BIT) + !digit;
     bn_resize(c, digit);
 
-    bn_data_tmp carry = 0;
+    u_bn_data_tmp carry = 0;
     for (int i = 0; i < c->size; i++) {
         bn_data tmp1 = (i < a->size) ? a->num[i] : 0;
         bn_data tmp2 = (i < b->size) ? b->num[i] : 0;
-        carry += (bn_data_tmp) tmp1 + tmp2;
+        carry += (u_bn_data_tmp) tmp1 + tmp2;
         c->num[i] = carry;
         carry >>= BN_BIT;
     }
@@ -103,8 +103,8 @@ static void _bn_add(bn *c, const bn *a, const bn *b)
 /* |C| = |A| - |B|, Assume |A| > |B| */
 static void _bn_sub(bn *c, const bn *a, const bn *b)
 {
-    unsigned int digit = max(a->size, b->size);
-    bn_resize(c, digit);
+    unsigned int csize = max(a->size, b->size);
+    bn_resize(c, csize);
 
     bn_data_tmp carry = 0;
     for (int i = 0; i < c->size; i++) {
@@ -113,14 +113,14 @@ static void _bn_sub(bn *c, const bn *a, const bn *b)
         carry = (bn_data_tmp) tmp1 - tmp2 - carry;
         c->num[i] =
             carry + (-(bn_data_tmp) (carry < 0) & ((bn_data_tmp) 1 << BN_BIT));
-        carry = (bn_data_tmp) (carry < 0);
+        carry = (carry < 0);
     }
 
     /* Remove leading zeros */
-    digit = bn_clz(c) / BN_BIT;
-    if (digit == c->size)  // c is 0
-        --digit;
-    bn_resize(c, c->size - digit);
+    csize = bn_clz(c) / BN_BIT;
+    if (csize == c->size)  // c is 0
+        --csize;
+    bn_resize(c, c->size - csize);
 }
 
 /* C = A + B */
@@ -174,11 +174,7 @@ void bn_sub(bn *c, const bn *a, const bn *b)
 /* C = A * B */
 void bn_mult(bn *c, const bn *a, const bn *b)
 {
-    if (a->size < b->size)
-        swap(a, b);
     unsigned int csize = a->size + b->size;
-    // unsigned int digit = bn_digit(a) + bn_digit(b);
-    // digit = DIV_ROUND_UP(digit, BN_BIT) + !digit;
 
     bn *tmp = NULL;
     bn_t out;
@@ -190,44 +186,29 @@ void bn_mult(bn *c, const bn *a, const bn *b)
     memset(c->num, 0, sizeof(bn_data) * c->size);
     bn_resize(c, csize);
 
-    // for (int i = 0; i < a->size; i++) {
-    //     for (int j = 0; j < b->size; j++) {
-    //         bn_data_tmp mult = (bn_data_tmp) a->num[i] * b->num[j];
-    //         bn_data_tmp carry = 0;
-    //         for (int k = i + j; k < c->size; k++) {
-    //             carry += (bn_data_tmp) c->num[k] + (bn_data) mult;
-    //             c->num[k] = (bn_data) carry;
-    //             carry >>= BN_BIT;
-    //             mult >>= BN_BIT;
-    //             if (!mult && !carry)
-    //                 break;
-    //         }
-    //     }
-    // }
+
+
     for (int i = 0; i < a->size; i++) {
-        bn_data_tmp carry = 0;
+        u_bn_data_tmp carry = 0;
         for (int j = 0; j < b->size; j++) {
-            bn_data_tmp t = (bn_data_tmp) c->num[i + j] +
-                            (bn_data_tmp) a->num[i] * b->num[j] + carry;
+            u_bn_data_tmp t = (u_bn_data_tmp) c->num[i + j] +
+                              (u_bn_data_tmp) a->num[i] * b->num[j] + carry;
             c->num[i + j] = (bn_data) t;
             carry = t >> BN_BIT;
         }
-        if (i + b->size < c->size) {
-            bn_data_tmp t = c->num[i + b->size] + carry;
-            c->num[i + b->size] = (bn_data) t;
-        }
+        c->num[i + b->size] = (bn_data) carry;
     }
+
+    while (csize > 1 && c->num[csize - 1] == 0)
+        csize--;
+    if (csize != c->size)
+        bn_resize(c, csize);
 
     c->sign = a->sign ^ b->sign;
 
-    if (c->size > 1 && !c->num[c->size - 1])
-        --c->size;
-
     if (tmp) {
         bn_free(tmp);
-        tmp->sign = c->sign;
-        tmp->size = c->size;
-        tmp->num = c->num;
+        *tmp = *c;
     }
 }
 
@@ -237,9 +218,9 @@ void bn_lshift(bn *src, unsigned int shift)
     if (!shift)
         return;
 
-    unsigned int clz = bn_clz(src);
+    unsigned int lzeros = bn_clz(src);
 
-    bn_resize(src, src->size + (shift > clz));
+    bn_resize(src, src->size + (shift > lzeros));
 
     for (int i = src->size - 1; i > 0; i--)
         src->num[i] =
@@ -302,4 +283,45 @@ void bn_fib(bn *p, long long k)
     bn_add(p, a, b);
     bn_free(a);
     bn_free(b);
+}
+
+void bn_fib_fdoubling(bn *p, long long k)
+{
+    p->sign = 0;
+    bn_resize(p, 1);
+    if (k <= 2) {
+        p->num[0] = !!k;
+        return;
+    }
+
+    bn *a = p;
+    bn_t b, c, d;
+    bn_init(b);
+    bn_init(c);
+    bn_init(d);
+    a->num[0] = 0;
+    b->num[0] = 1;
+
+    for (unsigned long long h = 1ULL << (63 - __builtin_clzll(k)); h; h >>= 1) {
+        bn_cpy(c, b);
+        bn_lshift(c, 1);
+        bn_sub(c, c, a);
+        bn_mult(c, c, a);
+
+        bn_mult(a, a, a);
+        bn_mult(b, b, b);
+        bn_cpy(d, a);
+        bn_add(d, d, b);
+
+        if (h & k) {
+            bn_cpy(a, d);
+            bn_add(b, c, d);
+        } else {
+            bn_cpy(a, c);
+            bn_cpy(b, d);
+        }
+    }
+    bn_free(b);
+    bn_free(c);
+    bn_free(d);
 }

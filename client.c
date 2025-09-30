@@ -6,7 +6,7 @@
 #include <unistd.h>
 
 #define FIB_DEV "/dev/fibonacci"
-#define BUF_SIZE 1000
+#define BUF_SIZE 10000
 
 int main()
 {
@@ -22,10 +22,10 @@ int main()
         exit(1);
     }
 
-    for (int i = 0; i <= offset; i++) {
-        sz = write(fd, write_buf, strlen(write_buf));
-        printf("Writing to " FIB_DEV ", returned the sequence %lld\n", sz);
-    }
+    // for (int i = 0; i <= offset; i++) {
+    //     sz = write(fd, write_buf, strlen(write_buf));
+    //     printf("Writing to " FIB_DEV ", returned the sequence %lld\n", sz);
+    // }
 
     for (int i = 0; i <= offset; i++) {
         lseek(fd, i, SEEK_SET);

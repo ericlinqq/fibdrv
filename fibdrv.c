@@ -156,7 +156,7 @@ static long long fib_sequence_fdoubling_clz(long long n)
     long long a = 0;  // F(0)
     long long b = 1;  // F(1)
 
-    for (unsigned long long h = 1UL << (63 - __builtin_clzll(n)); h; h >>= 1) {
+    for (unsigned long long h = 1ULL << (63 - __builtin_clzll(n)); h; h >>= 1) {
         long long c = a * (2 * b - a);  // F(2k) = F(k) * [2 * F(k+1) - F(k)]
         long long d = a * a + b * b;  // F(2k+1) = F(k) * F(k) + F(k+1) * F(k+1)
 
@@ -231,7 +231,7 @@ static ssize_t fib_read(struct file *file,
 {
     bn_t fib;
     bn_init(fib);
-    bn_fib(fib, *offset);
+    bn_fib_fdoubling(fib, *offset);
     char *fib_str = bn_to_string(fib);
     size_t remain = copy_to_user(buf, fib_str, strlen(fib_str) + 1);
     kfree(fib_str);

@@ -9,11 +9,13 @@
 #define _clz(x) __builtin_clzll((x))
 typedef u_int64_t bn_data;
 typedef __int128_t bn_data_tmp;
+typedef __uint128_t u_bn_data_tmp;
 #else
 #define BN_BIT 32
 #define _clz(x) __builtin_clz((x))
 typedef u_int32_t bn_data;
-typedef u_int64_t bn_data_tmp;
+typedef __int64_t bn_data_tmp;
+typedef u_int64_t u_bn_data_tmp;
 #endif
 
 static inline unsigned int clz(bn_data x)
