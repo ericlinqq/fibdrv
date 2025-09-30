@@ -23,7 +23,7 @@ MODULE_VERSION("0.1");
 /* MAX_LENGTH is set to 92 because
  * ssize_t can't fit the number > 92
  */
-#define MAX_LENGTH 92
+#define MAX_LENGTH 10000
 
 static dev_t fib_dev = 0;
 static struct class *fib_class;
@@ -229,7 +229,14 @@ static ssize_t fib_read(struct file *file,
                         size_t size,
                         loff_t *offset)
 {
-    return (ssize_t) fib_sequence_fdoubling(*offset);
+    bn_t fib;
+    bn_init(fib);
+    bn_fib(fib, *offset);
+    char *fib_str = bn_to_string(fib);
+    size_t remain = copy_to_user(buf, fib_str, strlen(fib_str) + 1);
+    kfree(fib_str);
+    bn_free(fib);
+    return (ssize_t) remain;
 }
 
 /*
@@ -260,7 +267,6 @@ static ssize_t fib_write(struct file *file,
         return 1;
     }
     fib_time_proxy(fc);
-    // return (ssize_t) ktime_to_ns(kt);
     return (ssize_t) fc->cycle;
 }
 
